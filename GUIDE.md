@@ -189,3 +189,158 @@ DiyReact.render = (element, container) => {
 ```
 
 You now have a working version of DiyReact that can add elements to the DOM. (We can remove elements yet.)
+
+## Adding Concurrency
+
+The problem with our current `render` is that it renders the complete element tree on the main thread. If the tree is really big, this could block the main thread for too long.
+
+To solve this, we will break the work into **small units**. After each small unit of work, we'll give the browser a chance to interrupt the rendering process to perform whatever else it needs to do.
+
+The core API we'll be using is `requestIdleCallback`, which accepts a callback that runs when the main thread is idle. (_Note that React doesn't use `requestIdleCallback` anymore but instead uses their own scheduler package. However, in principle, the idea is the same._)
+
+```js
+let nextUnitOfWork = null;
+
+const performUnitOfWork = nextUnitOfWork => {
+  // (1) Do something here
+  // (2) Then return next unit of work
+};
+
+// The callback is given a `deadline` argument where
+// we are told when the browser will take control again.
+// So while `deadline` has time remaining, we will loop
+// through existing units of work.
+const workLoopCallback = deadline => {
+  let shouldYield = false;
+  while (nextUnitOfWork && !shouldYield) {
+    nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
+    shouldYield = deadline.timeRemaining() < 1;
+  }
+  requestIdleCallback(workLoopCallback);
+};
+
+requestIdleCallback(workLoopCallback);
+```
+
+### Fibers
+
+We need a data structure to organize our units of work in `performUnitOfWork`. The data structure we'll use is called a **fiber tree**, and it corresponds to our virtual DOM tree.
+
+Each **fiber** is an element representing 1 unit of work. In pseudocode, here's how we will handle each fiber in the fiber tree:
+
+1. Add the element to the DOM.
+2. Determine what fiber to create next:
+   1. Try to create a fiber for the element's first child.
+   2. If the element has no children, create a fiber for its nearest sibling.
+   3. If the element has no sibling, we move onto the parent's sibling or the parent's parent's sibling (up and up the tree until we find a sibling).
+3. If we reach the root, stop. Otherwise, set the next unit of work based on the newly created fiber.
+
+To perform this pseudocode, every fiber must have a link to its
+
+- First child
+- Next sibling
+- Parent
+
+For example, take this DOM tree:
+
+```html
+<div>
+  <h1>
+    <span>Hello World: </span>
+    <a href="">Click Me</a>
+  </h1>
+  <p>I'm some text</p>
+</div>
+```
+
+In the example above, we will
+
+1. Create the `div` element and create a fiber for the next child `h1` as the next unit of work.
+2. When the `h1` unit of work runs, create the `h1` element. With a first child of `span`, we set this as the next unit of work.
+3. When the `span` unit of work runs, we create the element and then move onto `a`, the nearest sibling.
+4. When the `a` unit of work runs, we create the element and move onto `p`, the parent's sibling, since `a` has no children or next siblings of its own.
+5. Finally, when the `p` unit of work runs, we create the element, and we're done. There are no more children, siblings, or parent's siblings.
+
+### Code implementation of concurrency and the fiber tree
+
+The first thing we need to do is move the DOM creation inside `render` into its own function:
+
+```js
+const createDom = fiber => {
+  const dom =
+    fiber.type === 'TEXT_ELEMENT'
+      ? document.createTextNode('')
+      : document.createElement(fiber.type);
+
+  Object.keys(fiber.props)
+    .filter(key => key !== 'children')
+    .forEach(key => (dom[key] = fiber.props[key]));
+
+  return dom;
+};
+```
+
+The `render` function will now only do 1 thing: set the first unit of work to the root of the fiber tree.
+
+```js
+const render = (element, container) => {
+  nextUnitOfWork = {
+    dom: container,
+    props: {
+      children: [element],
+    },
+  };
+};
+```
+
+When the main thread is idle, it will call our `workLoopCallback`, where we run `performUnitOfWork`. This is where we'll (1) add DOM nodes and (2) create new fibers to set as the next units of work.
+
+```js
+const performUnitOfWork = fiber => {
+  // 1. Add DOM node
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+  // 2. Append DOM node to parent node
+  if (fiber.parent) {
+    fiber.parent.dom.appendChild(fiber.dom);
+  }
+
+  // 2. Create fibers for children and link them
+  const elements = fiber.props.children;
+  let prevSibling = null;
+  elements.forEach((element, index) => {
+    const newFiber = {
+      type: element.type,
+      props: element.props,
+      parent: fiber,
+      dom: null,
+    };
+
+    // If it's the first child, link the fiber to the parent
+    // Otherwise, link it to the sibling
+    if (index === 0) {
+      fiber.child = newFiber;
+    } else {
+      prevSibling.sibling = newFiber;
+    }
+
+    prevSibling = newFiber;
+  });
+
+  // 3. Search for and return next unit of work
+  // Try to return first child first
+  if (fiber.child) {
+    return fiber.child;
+  }
+  // Try to return sibling next
+  let nextFiber = fiber;
+  while (nextFiber) {
+    if (nextFiber.sibling) {
+      return nextFiber.sibling;
+    }
+    // If sibling not found, move to parent's sibling
+    nextFiber = nextFiber.parent;
+  }
+};
+```
