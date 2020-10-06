@@ -266,7 +266,7 @@ In the example above, we will
 The first thing we need to do is move the DOM creation inside `render` into its own function:
 
 ```js
-const createDom = fiber => {
+DiyReact.createDom = fiber => {
   const dom =
     fiber.type === 'TEXT_ELEMENT'
       ? document.createTextNode('')
@@ -283,7 +283,7 @@ const createDom = fiber => {
 The `render` function will now only do 1 thing: set the first unit of work to the root of the fiber tree.
 
 ```js
-const render = (element, container) => {
+DiyReact.render = (element, container) => {
   nextUnitOfWork = {
     dom: container,
     props: {
@@ -342,5 +342,101 @@ const performUnitOfWork = fiber => {
     // If sibling not found, move to parent's sibling
     nextFiber = nextFiber.parent;
   }
+};
+```
+
+## The Commit Phase
+
+The next problem with our code is that new nodes are constantly being added to the DOM, but the main thread could interrupt our work mid-render. As a result, the user could see an **incomplete UI** while the main thread is occupied.
+
+To solve this problem, instead of mutating the DOM _as we construct_ the fiber tree, we are only going to mutate the DOM _after_ all units of work are complete. We call this the **commit phase**.
+
+To start, let's delete these lines of code because we don't need to mutate the DOM on the spot anymore:
+
+```js
+function performUnitOfWork(fiber) {
+  // ...
+​
+  // if (fiber.parent) {
+  //   fiber.parent.dom.appendChild(fiber.dom)
+  // }
+
+  // ...
+}
+```
+
+Instead, we will construct the entire fiber tree and store the root of that tree in a `fiberRoot` variable:
+
+```js
+let nextUnitOfWork = null;
+let fiberRoot = null;
+
+// The render function now stores the fiberRoot
+// and sets it as the next unit of work to get the ball rolling
+DiyReact.render = (element, container) => {
+  fiberRoot = {
+    dom: container,
+    props: {
+      children: [element],
+    },
+  };
+  nextUnitOfWork = fiberRoot;
+};
+```
+
+Then, when we've constructed the entire fiber tree, we will run the `commitRoot` and `commitWork` functions that perform the DOM manipulation:
+
+```js
+const workLoopCallback = deadline => {
+  let shouldYield = false;
+  while (nextUnitOfWork && !shouldYield) {
+    nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
+    shouldYield = deadline.timeRemaining() < 1;
+  }
+
+  // commitRoot only runs AFTER we've constructed the fiber tree
+  if (!nextUnitOfWork && fiberRoot) {
+    commitRoot();
+  }
+
+  requestIdleCallback(workLoopCallback);
+};
+
+// This is where DOM manipulation happens
+// Recursively, we append a fiber to its parent
+// Then we move on to committing/rendering its first child and nearest sibling.
+const commitWork = fiber => {
+  if (!fiber) return;
+
+  const domParent = fiber.parent.dom;
+  domParent.appendChild(fiber.dom);
+  commitWork(fiber.child);
+  commitWork(fiber.sibling);
+};
+
+// This function gets the ball rolling by
+// committing/rendering the first child of the fiber root
+const commitRoot = () => {
+  commitWork(fiberRoot.child);
+  fiberRoot = null;
+};
+```
+
+## Reconciliation
+
+The next concern we have is handling **updates** and **deletions** of nodes in the DOM. To do this, we need to compare elements in our current fiber tree to the **last fiber tree we committed in the DOM**.
+
+So, the first thing we have to do is store a reference to the last fiber tree we committed:
+
+```js
+let currentRoot = null;
+
+const commitRoot = () => {
+  commitWork(wipRoot.child);
+
+  // When we commit the fiber tree, we store it!
+  currentRoot = wipRoot;
+
+  wipRoot = null;
 };
 ```
