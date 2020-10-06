@@ -306,7 +306,7 @@ const performUnitOfWork = fiber => {
     fiber.parent.dom.appendChild(fiber.dom);
   }
 
-  // 2. Create fibers for children and link them
+  // 3. Create fibers for children and link them
   const elements = fiber.props.children;
   let prevSibling = null;
   elements.forEach((element, index) => {
@@ -328,7 +328,7 @@ const performUnitOfWork = fiber => {
     prevSibling = newFiber;
   });
 
-  // 3. Search for and return next unit of work
+  // 4. Search for and return next unit of work
   // Try to return first child first
   if (fiber.child) {
     return fiber.child;
@@ -365,22 +365,22 @@ function performUnitOfWork(fiber) {
 }
 ```
 
-Instead, we will construct the entire fiber tree and store the root of that tree in a `fiberRoot` variable:
+Instead, we will construct the entire fiber tree and store the root of that tree in a `wipRoot` variable:
 
 ```js
 let nextUnitOfWork = null;
-let fiberRoot = null;
+let wipRoot = null;
 
-// The render function now stores the fiberRoot
+// The render function now stores the wipRoot
 // and sets it as the next unit of work to get the ball rolling
 DiyReact.render = (element, container) => {
-  fiberRoot = {
+  wipRoot = {
     dom: container,
     props: {
       children: [element],
     },
   };
-  nextUnitOfWork = fiberRoot;
+  nextUnitOfWork = wipRoot;
 };
 ```
 
@@ -395,7 +395,7 @@ const workLoopCallback = deadline => {
   }
 
   // commitRoot only runs AFTER we've constructed the fiber tree
-  if (!nextUnitOfWork && fiberRoot) {
+  if (!nextUnitOfWork && wipRoot) {
     commitRoot();
   }
 
@@ -417,8 +417,8 @@ const commitWork = fiber => {
 // This function gets the ball rolling by
 // committing/rendering the first child of the fiber root
 const commitRoot = () => {
-  commitWork(fiberRoot.child);
-  fiberRoot = null;
+  commitWork(wipRoot.child);
+  wipRoot = null;
 };
 ```
 
@@ -426,7 +426,7 @@ const commitRoot = () => {
 
 The next concern we have is handling **updates** and **deletions** of nodes in the DOM. To do this, we need to compare elements in our current fiber tree to the **last fiber tree we committed in the DOM**.
 
-So, the first thing we have to do is store a reference to the last fiber tree we committed:
+So, the first thing we have to do is store a reference to the last fiber tree we committed--both in a global variable _and_ in the `wipRoot` itself:
 
 ```js
 let currentRoot = null;
@@ -434,9 +434,63 @@ let currentRoot = null;
 const commitRoot = () => {
   commitWork(wipRoot.child);
 
-  // When we commit the fiber tree, we store it!
+  // Before we commit our current fiber tree,
+  // we store it as the last committed fiber tree
+  // (because it's about to be committed)
   currentRoot = wipRoot;
 
   wipRoot = null;
 };
+
+DiyReact.render = (element, container) => {
+  wipRoot = {
+    dom: container,
+    props: {
+      children: [element],
+    },
+    // And we store our last committed fiber tree
+    // inside our current fiber tree too!
+    alternate: currentRoot;
+  }
+};
 ```
+
+Now that we have access to our last committed fiber tree, we want to refactor the code where we _create_ our fibers. Fiber creation can be found in `performUnitOfWork`; this is where we loop over the children of our active fiber and create fibers for those children.
+
+Now that we're going to perform a comparison _between_ children, we want to move the logic to a `reconcileChildren` function:
+
+```js
+const performUnitOfWork = fiber => {
+  // ...
+
+  const elements = fiber.props.children;
+  reconcileChildren(fiber, elements);
+
+  // ...
+};
+
+const reconcileChildren = (wipFiber, elements) => {
+  let index = 0;
+  let oldFiber = wipFiber.alternate && wipFiber.alternate.child;
+  let prevSibling = null;
+
+  // We're essentially looping through the incoming children
+  // and the old children at the same time!
+  while (index < elements.length || oldFiber != null) {
+    const element = elements[index];
+    let newFiber = null;
+
+    // TODO: Compare oldFiber to element
+    // element = what we want to render
+    // oldFiber = what we rendered last time
+  }
+};
+```
+
+Using the `type` property of each element, there are 3 comparisons we care about with 3 different responses:
+
+1. If the old fiber and the new element have the **same type**, we **keep the DOM node** and **update the props**.
+2. If the **type is different** and the **new element exists**, we **create a new DOM node**.
+3. If the **type is different** and the **old fiber exists**, we **remove the old DOM node**.
+
+**Note**: React uses `key` properties for more efficient reconciliation. For example, a `key` helps React know when children change positions in an array.
