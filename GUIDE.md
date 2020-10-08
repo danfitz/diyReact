@@ -592,8 +592,97 @@ const commitWork = fiber => {
 };
 ```
 
-`PLACEMENT` and `DELETION` are easy. We just add or remove the DOM node from the parent. The trickier part is handling `UPDATE`, so we create an `updateDom` helper function to encapsulate the update logic:
+`PLACEMENT` and `DELETION` are easy. We just add or remove the DOM node from the parent. The trickier part is handling `UPDATE` because it requires comparing old and new props. In particular, we need to
+
+- Remove props that are gone, and
+- Set props that are new or have changed.
+
+We create an `updateDom` helper function to encapsulate this update logic:
 
 ```js
-const updateDom = (domq, prevProps, nextProps) => {};
+// Prop checks
+const isProp = key => key !== 'children' && !isEvent(key);
+const isNew = (prev, next) => key => prev[key] !== next[key];
+const isGone = (prev, next) => key => !(key in next);
+
+const updateDom = (dom, prevProps, nextProps) => {
+  // Remove old properties
+  Object.keys(prevProps)
+    .filter(isProp)
+    .filter(isGone(prevProps, nextProps))
+    .forEach(name => (dom[name] = ''));
+
+  // Set new or changed properties
+  Object.keys(nextProps)
+    .filter(isProp)
+    .filter(isNew(prevProps, nextProps))
+    .forEach(name => (dom[name] = nextProps[name]));
+};
+```
+
+However, we need to factor for _event listeners_ because adding or removing them specially requires using `addEventListener` and `removeEvenListener`, so let's refactor:
+
+```js
+// Prop checks
+const isEvent = key => key.startsWith('on');
+// isProp, isNew, isGone...
+
+const updateDom = (dom, prevProps, nextProps) => {
+  // Remove old or changed event listeners
+  Object.keys(prevProps)
+    .filter(isEvent)
+    .filter(key => !(key in nextProps) || isNew(prevProps, nextProps)(key))
+    .forEach(name => {
+      const eventType = name.toLowerCase().substring(2);
+      dom.removeEventListener(eventType, prevProps[name]);
+    });
+
+  // Add event listeners
+  Object.keys(nextProps)
+    .filter(isEvent)
+    .filter(isNew(prevProps, nextProps))
+    .forEach(name => {
+      const eventType = name.toLowerCase().substring(2);
+      dom.addEventListener(eventType, nextProps[name]);
+    });
+
+  // Remove old properties...
+  // Set new or changed properties...
+};
+```
+
+## Function Components
+
+Let's add support for **function components** now. Function components have 2 core differences:
+
+1. When creating a fiber, you don't have a DOM node.
+2. `children` come from invoking the function instead of accessing them through `props`.
+
+`TODO: Explain how the function itself is passed to the element's type property.`
+
+To start, we need to refactor the fiber creation part of the render phase. In particular, we need to move the existing logic into an `updateHostComponent` function and create an `updateFunctionComponent` function to handle the special case of function components.
+
+```js
+const performUnitOfWork = fiber => {
+  const isFunctionComponent = fiber.type instanceof Function;
+  if (isFunctionComponent) {
+    updateFunctionComponent(fiber);
+  } else {
+    updateHostComponent(fiber);
+  }
+
+  // ...
+};
+
+const updateFunctionComponent = fiber => {
+  // TODO
+};
+
+// This code used to be in performUnitOfWork
+const updateHostComponent = fiber => {
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+  reconcileChildren(fiber, fiber.props.children);
+};
 ```
