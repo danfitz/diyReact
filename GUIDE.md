@@ -345,7 +345,7 @@ const performUnitOfWork = fiber => {
 };
 ```
 
-## The Commit Phase
+## The Render and Commit Phases
 
 The next problem with our code is that new nodes are constantly being added to the DOM, but the main thread could interrupt our work mid-render. As a result, the user could see an **incomplete UI** while the main thread is occupied.
 
@@ -448,8 +448,8 @@ DiyReact.render = (element, container) => {
     props: {
       children: [element],
     },
-    // And we store our last committed fiber tree
-    // inside our current fiber tree too!
+    // And during render, we store our last committed
+    // fiber tree's root as the ALTERNATE of our WIP root
     alternate: currentRoot;
   }
 };
@@ -483,6 +483,16 @@ const reconcileChildren = (wipFiber, elements) => {
     // TODO: Compare oldFiber to element
     // element = what we want to render
     // oldFiber = what we rendered last time
+
+    if (oldFiber) oldFiber = oldFiber.sibling;
+
+    if (index === 0) {
+      wipFiber.child = newFiber;
+    } else {
+      prevSibling.sibling = newFiber;
+    }
+
+    prevSibling = newFiber;
   }
 };
 ```
@@ -494,3 +504,96 @@ Using the `type` property of each element, there are 3 comparisons we care about
 3. If the **type is different** and the **old fiber exists**, we **remove the old DOM node**.
 
 **Note**: React uses `key` properties for more efficient reconciliation. For example, a `key` helps React know when children change positions in an array.
+
+Here's the implementation:
+
+```js
+const reconcileChildren = (wipFiber, elements) => {
+  // ...
+
+  const sameType = oldFiber && element && oldFiber.type === element.type;
+
+  // We mix and match properties here
+  if (sameType) {
+    newFiber = {
+      type: oldFiber.type,
+      props: element.props,
+      dom: oldFiber.dom,
+      parent: wipFiber,
+      alternate: oldFiber, // Link the alternate here too
+      effectTag: 'UPDATE', // Used during commit
+    };
+  }
+
+  // We create a new fiber
+  if (element && !sameType) {
+    newFiber = {
+      type: element.type,
+      props: element.props,
+      dom: null,
+      parent: wipFiber,
+      alternate: null,
+      effectTag: 'PLACEMENT',
+    };
+  }
+
+  // We keep the old fiber and send it for deletion
+  if (oldFiber && !sameType) {
+    oldFiber.effectTag = 'DELETION';
+    deletions.push(oldFiber);
+  }
+
+  // ...
+};
+```
+
+Notice how we send the old fiber for deletion by pushing it into a `deletions` array. We need to add a bit more code to get `deletions` to become part of the commit phase:
+
+```js
+let deletions = null;
+
+DiyReact.render = (element, container) => {
+  // ...
+
+  // Reset to empty array when we start on a new
+  // render and commit phase
+  deletions = [];
+
+  // ...
+};
+
+const commitRoot = () => {
+  // During the commit phase, we actually
+  // start the DOM manipulation using the old fibers
+  deletions.forEach(commitWork);
+
+  // ...
+};
+```
+
+Now that our old fibers are up for `DELETION` and our new fibers are up for `UPDATE` or `PLACEMENT`, we need to refactor `commitWork` to handle these `effectTags`:
+
+```js
+const commitWork = fiber => {
+  if (!fiber) return;
+
+  const domParent = fiber.parent.dom;
+
+  if (fiber.effectTag === 'PLACEMENT' && fiber.dom !== null) {
+    domParent.appendChild(fiber.dom);
+  } else if (fiber.effectTag === 'DELETION') {
+    domParent.removeChild(fiber.dom);
+  } else if (fiber.effectTag === 'UPDATE' && fiber.dom !== null) {
+    updateDom(fiber.dom, fiber.alternate.props, fiber.props);
+  }
+
+  commitWork(fiber.child);
+  commitWork(fiber.sibling);
+};
+```
+
+`PLACEMENT` and `DELETION` are easy. We just add or remove the DOM node from the parent. The trickier part is handling `UPDATE`, so we create an `updateDom` helper function to encapsulate the update logic:
+
+```js
+const updateDom = (domq, prevProps, nextProps) => {};
+```
