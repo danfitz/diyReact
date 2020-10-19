@@ -655,15 +655,15 @@ const updateDom = (dom, prevProps, nextProps) => {
 
 Let's add support for **function components** now. Function components have 2 core differences:
 
-1. When creating a fiber, you don't have a DOM node.
+1. When creating a fiber, you don't have a DOM node. (After all, why would a function need a DOM node?)
 2. `children` come from invoking the function instead of accessing them through `props`.
-
-`TODO: Explain how the function itself is passed to the element's type property.`
 
 To start, we need to refactor the fiber creation part of the render phase. In particular, we need to move the existing logic into an `updateHostComponent` function and create an `updateFunctionComponent` function to handle the special case of function components.
 
 ```js
 const performUnitOfWork = fiber => {
+  // fiber.type can be a function because JSX like <Component />
+  // will pass the function itself to the type property
   const isFunctionComponent = fiber.type instanceof Function;
   if (isFunctionComponent) {
     updateFunctionComponent(fiber);
@@ -684,5 +684,106 @@ const updateHostComponent = fiber => {
     fiber.dom = createDom(fiber);
   }
   reconcileChildren(fiber, fiber.props.children);
+};
+```
+
+So this is what will happen in our `updateFunctionComponent`:
+
+```js
+const updateFunctionComponent = fiber => {
+  // 1. Get children by invoking function
+  const children = [fiber.type(fiber.props)];
+  // Perform reconciliation just like normal
+  reconcileChildren(fiber, children);
+};
+```
+
+The last thing we need to do to support function components is to refactor `commitWork` given that function components themselves don't have DOM nodes.
+
+In particular, we need to do 2 things:
+
+1. When appending a DOM node, we need to traverse up the fiber tree until we find a parent fiber with a DOM node (i.e. a parent fiber that isn't a function component).
+   - This happens under the `PLACEMENT` effect tag.
+2. Similarly, when removing a DOM node, we need to traverse down and down the fiber tree until we find a child fiber with a DOM node (i.e. a child fiber that isn't a function component).
+   - This happens under the `DELETION` effect tag.
+
+```js
+const commitWork = fiber => {
+  // ...
+
+  // Go up the fiber tree until you find a parent with a DOM node
+  // (a parent that isn't a function component)
+  let domParentFiber = fiber.parent;
+  while (!domParentFiber.dom) {
+    domParentFiber = domParentFiber.parent;
+  }
+  const domParent = domParentFiber.dom;
+
+  if (fiber.effectTag === 'PLACEMENT' && fiber.dom !== null) {
+    domParent.appendChild(fiber.dom);
+  } else if (/* */) {
+
+    // ...
+
+  } else if (fiber.effectTag === 'DELETION') {
+    commitDeletion(fiber, domParent);
+  }
+
+  // ...
+};
+
+// Go down and down the fiber tree until you find a child with a DOM node
+// (a child that isn't a function component)
+const commitDeletion = (fiber, domParent) => {
+  if (fiber.dom) {
+    domParent.removeChild(fiber.dom);
+  } else {
+    commitDeletion(fiber.child, domParent);
+  }
+}
+```
+
+## Hooks
+
+Now that we have function components, it makes sense to add **state**, specifically the `useState` hook.
+
+To begin, we need access to some global variables that we initialize in the `updateFunctionComponent` function:
+
+```js
+let wipFiber = null;
+let hookIndex = null;
+
+const updateFunctionComponent = fiber => {
+  wipFiber = fiber;
+  hookIndex = 0;
+  wipFiber.hooks = [];
+
+  // ...
+};
+```
+
+**Note**: We keep track of an array of `hooks` because it allows us to support multiple uses of `useState`.
+
+The next thing we need to do is **persist** state: every time a function component goes through the render and commit phases, we want any state it had to carry over.
+
+That means:
+
+1. We check if any old hook exists in `wipFiber.alternate.hooks` using the current `hookIndex`.
+2. If it does exist, we copy the state from the old hook into the new hook.
+3. Otherwise, we initialize the state.
+4. Finally, we append the hook to the fiber and increment the `hookIndex`.
+
+```js
+DiyReact.useState = initial => {
+  const oldHook =
+    wipFiber.alternate &&
+    wipFiber.alternate.hooks &&
+    wipFiber.alternate.hooks[hookIndex];
+
+  const hook = { state: oldHook ? oldHook.state : initial };
+
+  wipFiber.hooks.push(hook);
+  hookIndex++;
+  return [hook.state];
 };
 ```
