@@ -51,16 +51,16 @@ So, `ReactDOM.render(element, container);` is just a fancy way of performing the
 5. Append the main DOM node to the container.
 
 ```js
-const document.getElementById('root');
+const container = document.getElementById('root');
 
 // 1
 const node = document.createElement(element.type);
 // 2
-node["color"] = element.props.color;
+node['color'] = element.props.color;
 
 // 3
 // Since `children` is just a string, we just create a text node
-const textNode = document.createTextNode("");
+const textNode = document.createTextNode('');
 textNode.nodeValue = element.props.children;
 
 // 4
