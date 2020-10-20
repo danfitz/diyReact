@@ -11,8 +11,8 @@ The most basic React application goes something like this:
 3. Insert the React element into the container.
 
 ```js
-const element = <h1 color="green">Hello World</h1>;
-const container = document.getElementById("root");
+const element = <h1 color='green'>Hello World</h1>;
+const container = document.getElementById('root');
 ReactDOM.render(element, container);
 ```
 
@@ -21,17 +21,17 @@ ReactDOM.render(element, container);
 With transpilation, the JSX above is really just:
 
 ```js
-const element = React.createElement("h1", { color: "green" }, "Hello World");
+const element = React.createElement('h1', { color: 'green' }, 'Hello World');
 ```
 
 And `React.createElement` is just a fancy way of constructing an object that represents an element:
 
 ```js
 const element = {
-  type: "h1",
+  type: 'h1',
   props: {
-    color: "green",
-    children: "Hello World",
+    color: 'green',
+    children: 'Hello World',
   },
 };
 ```
@@ -92,7 +92,7 @@ The key thing here is that we use the rest syntax to turn all child elements pas
 With the function above alone, running
 
 ```js
-DiyReact.createElement("div");
+DiyReact.createElement('div');
 ```
 
 will generate this:
@@ -101,7 +101,7 @@ will generate this:
 // - There are no other props b/c `props` parameter is undefined, and spreading undefined does nothing
 // - Children is an empty array b/c the rest syntax groups together nothing
 const element = {
-  type: "div",
+  type: 'div',
   props: {
     children: [],
   },
@@ -114,14 +114,14 @@ Similarly, running
 
 ```js
 // We pass null to skip the props argument
-DiyReact.createElement("div", null, childElement);
+DiyReact.createElement('div', null, childElement);
 ```
 
 will generate this:
 
 ```js
 const element = {
-  type: "div",
+  type: 'div',
   props: {
     children: [childElement],
   },
@@ -158,7 +158,7 @@ All it takes to tell Babel to use `DiyReact.createElement` instead of `React.cre
 
 ```js
 /** @jsx DiyReact.createElement */
-const element = <div color="green">Hello World!</div>;
+const element = <div color='green'>Hello World!</div>;
 ```
 
 Now when babel transpiles the JSX, it will use our function instead of React's.
@@ -171,24 +171,24 @@ Just like with the vanilla JS above, we'll do something similar with our own `re
 DiyReact.render = (element, container) => {
   // 1. Create node (text node if it's a TEXT_ELEMENT)
   const node =
-    element.type === "TEXT_ELEMENT"
-      ? document.createTextNode("")
+    element.type === 'TEXT_ELEMENT'
+      ? document.createTextNode('')
       : document.createElement(element.type);
 
   // 2. Assign props to node
   Object.keys(element.props)
-    .filter((key) => key !== "children")
-    .forEach((key) => (node[key] = element.props[key]));
+    .filter(key => key !== 'children')
+    .forEach(key => (node[key] = element.props[key]));
 
   // 3. Recursively render children
-  element.props.children.forEach((child) => DiyReact.render(child, node));
+  element.props.children.forEach(child => DiyReact.render(child, node));
 
   // 4. Append node to container
   container.appendChild(node);
 };
 ```
 
-You now have a working version of DiyReact that can add elements to the DOM. (We can remove elements yet.)
+You now have a working version of DiyReact that can add elements to the DOM. (We can't remove elements yet.)
 
 ## Adding Concurrency
 
@@ -201,7 +201,7 @@ The core API we'll be using is `requestIdleCallback`, which accepts a callback t
 ```js
 let nextUnitOfWork = null;
 
-const performUnitOfWork = (nextUnitOfWork) => {
+const performUnitOfWork = nextUnitOfWork => {
   // (1) Do something here
   // (2) Then return next unit of work
 };
@@ -210,7 +210,7 @@ const performUnitOfWork = (nextUnitOfWork) => {
 // we are told when the browser will take control again.
 // So while `deadline` has time remaining, we will loop
 // through existing units of work.
-const workLoopCallback = (deadline) => {
+const workLoopCallback = deadline => {
   let shouldYield = false;
   while (nextUnitOfWork && !shouldYield) {
     nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
@@ -266,15 +266,15 @@ In the example above, we will
 The first thing we need to do is move the DOM creation inside `render` into its own function:
 
 ```js
-DiyReact.createDom = (fiber) => {
+DiyReact.createDom = fiber => {
   const dom =
-    fiber.type === "TEXT_ELEMENT"
-      ? document.createTextNode("")
+    fiber.type === 'TEXT_ELEMENT'
+      ? document.createTextNode('')
       : document.createElement(fiber.type);
 
   Object.keys(fiber.props)
-    .filter((key) => key !== "children")
-    .forEach((key) => (dom[key] = fiber.props[key]));
+    .filter(key => key !== 'children')
+    .forEach(key => (dom[key] = fiber.props[key]));
 
   return dom;
 };
@@ -296,7 +296,7 @@ DiyReact.render = (element, container) => {
 When the main thread is idle, it will call our `workLoopCallback`, where we run `performUnitOfWork`. This is where we'll (1) add DOM nodes and (2) create new fibers to set as the next units of work.
 
 ```js
-const performUnitOfWork = (fiber) => {
+const performUnitOfWork = fiber => {
   // 1. Add DOM node
   if (!fiber.dom) {
     fiber.dom = createDom(fiber);
@@ -387,7 +387,7 @@ DiyReact.render = (element, container) => {
 Then, when we've constructed the entire fiber tree, we will run the `commitRoot` and `commitWork` functions that perform the DOM manipulation:
 
 ```js
-const workLoopCallback = (deadline) => {
+const workLoopCallback = deadline => {
   let shouldYield = false;
   while (nextUnitOfWork && !shouldYield) {
     nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
@@ -405,7 +405,7 @@ const workLoopCallback = (deadline) => {
 // This is where DOM manipulation happens
 // Recursively, we append a fiber to its parent
 // Then we move on to committing/rendering its first child and nearest sibling.
-const commitWork = (fiber) => {
+const commitWork = fiber => {
   if (!fiber) return;
 
   const domParent = fiber.parent.dom;
@@ -460,7 +460,7 @@ Now that we have access to our last committed fiber tree, we want to refactor th
 Now that we're going to perform a comparison _between_ children, we want to move the logic to a `reconcileChildren` function:
 
 ```js
-const performUnitOfWork = (fiber) => {
+const performUnitOfWork = fiber => {
   // ...
 
   const elements = fiber.props.children;
@@ -521,7 +521,7 @@ const reconcileChildren = (wipFiber, elements) => {
       dom: oldFiber.dom,
       parent: wipFiber,
       alternate: oldFiber, // Link the alternate here too
-      effectTag: "UPDATE", // Used during commit
+      effectTag: 'UPDATE', // Used during commit
     };
   }
 
@@ -533,13 +533,13 @@ const reconcileChildren = (wipFiber, elements) => {
       dom: null,
       parent: wipFiber,
       alternate: null,
-      effectTag: "PLACEMENT",
+      effectTag: 'PLACEMENT',
     };
   }
 
   // We keep the old fiber and send it for deletion
   if (oldFiber && !sameType) {
-    oldFiber.effectTag = "DELETION";
+    oldFiber.effectTag = 'DELETION';
     deletions.push(oldFiber);
   }
 
@@ -574,16 +574,16 @@ const commitRoot = () => {
 Now that our old fibers are up for `DELETION` and our new fibers are up for `UPDATE` or `PLACEMENT`, we need to refactor `commitWork` to handle these `effectTags`:
 
 ```js
-const commitWork = (fiber) => {
+const commitWork = fiber => {
   if (!fiber) return;
 
   const domParent = fiber.parent.dom;
 
-  if (fiber.effectTag === "PLACEMENT" && fiber.dom !== null) {
+  if (fiber.effectTag === 'PLACEMENT' && fiber.dom !== null) {
     domParent.appendChild(fiber.dom);
-  } else if (fiber.effectTag === "DELETION") {
+  } else if (fiber.effectTag === 'DELETION') {
     domParent.removeChild(fiber.dom);
-  } else if (fiber.effectTag === "UPDATE" && fiber.dom !== null) {
+  } else if (fiber.effectTag === 'UPDATE' && fiber.dom !== null) {
     updateDom(fiber.dom, fiber.alternate.props, fiber.props);
   }
 
@@ -601,22 +601,22 @@ We create an `updateDom` helper function to encapsulate this update logic:
 
 ```js
 // Prop checks
-const isProp = (key) => key !== "children" && !isEvent(key);
-const isNew = (prev, next) => (key) => prev[key] !== next[key];
-const isGone = (prev, next) => (key) => !(key in next);
+const isProp = key => key !== 'children' && !isEvent(key);
+const isNew = (prev, next) => key => prev[key] !== next[key];
+const isGone = (prev, next) => key => !(key in next);
 
 const updateDom = (dom, prevProps, nextProps) => {
   // Remove old properties
   Object.keys(prevProps)
     .filter(isProp)
     .filter(isGone(prevProps, nextProps))
-    .forEach((name) => (dom[name] = ""));
+    .forEach(name => (dom[name] = ''));
 
   // Set new or changed properties
   Object.keys(nextProps)
     .filter(isProp)
     .filter(isNew(prevProps, nextProps))
-    .forEach((name) => (dom[name] = nextProps[name]));
+    .forEach(name => (dom[name] = nextProps[name]));
 };
 ```
 
@@ -624,15 +624,15 @@ However, we need to factor for _event listeners_ because adding or removing them
 
 ```js
 // Prop checks
-const isEvent = (key) => key.startsWith("on");
+const isEvent = key => key.startsWith('on');
 // isProp, isNew, isGone...
 
 const updateDom = (dom, prevProps, nextProps) => {
   // Remove old or changed event listeners
   Object.keys(prevProps)
     .filter(isEvent)
-    .filter((key) => !(key in nextProps) || isNew(prevProps, nextProps)(key))
-    .forEach((name) => {
+    .filter(key => !(key in nextProps) || isNew(prevProps, nextProps)(key))
+    .forEach(name => {
       const eventType = name.toLowerCase().substring(2);
       dom.removeEventListener(eventType, prevProps[name]);
     });
@@ -641,7 +641,7 @@ const updateDom = (dom, prevProps, nextProps) => {
   Object.keys(nextProps)
     .filter(isEvent)
     .filter(isNew(prevProps, nextProps))
-    .forEach((name) => {
+    .forEach(name => {
       const eventType = name.toLowerCase().substring(2);
       dom.addEventListener(eventType, nextProps[name]);
     });
@@ -661,7 +661,7 @@ Let's add support for **function components** now. Function components have 2 co
 To start, we need to refactor the fiber creation part of the render phase. In particular, we need to move the existing logic into an `updateHostComponent` function and create an `updateFunctionComponent` function to handle the special case of function components.
 
 ```js
-const performUnitOfWork = (fiber) => {
+const performUnitOfWork = fiber => {
   // fiber.type can be a function because JSX like <Component />
   // will pass the function itself to the type property
   const isFunctionComponent = fiber.type instanceof Function;
@@ -674,12 +674,12 @@ const performUnitOfWork = (fiber) => {
   // ...
 };
 
-const updateFunctionComponent = (fiber) => {
+const updateFunctionComponent = fiber => {
   // TODO
 };
 
 // This code used to be in performUnitOfWork
-const updateHostComponent = (fiber) => {
+const updateHostComponent = fiber => {
   if (!fiber.dom) {
     fiber.dom = createDom(fiber);
   }
@@ -690,7 +690,7 @@ const updateHostComponent = (fiber) => {
 So this is what will happen in our `updateFunctionComponent`:
 
 ```js
-const updateFunctionComponent = (fiber) => {
+const updateFunctionComponent = fiber => {
   // 1. Get children by invoking function
   const children = [fiber.type(fiber.props)];
   // Perform reconciliation just like normal
@@ -753,7 +753,7 @@ To begin, we need access to some global variables that we initialize in the `upd
 let wipFiber = null;
 let hookIndex = null;
 
-const updateFunctionComponent = (fiber) => {
+const updateFunctionComponent = fiber => {
   wipFiber = fiber;
   hookIndex = 0;
   wipFiber.hooks = [];
@@ -774,7 +774,7 @@ That means:
 4. Finally, we append the hook to the fiber and increment the `hookIndex`.
 
 ```js
-DiyReact.useState = (initial) => {
+DiyReact.useState = initial => {
   const oldHook =
     wipFiber.alternate &&
     wipFiber.alternate.hooks &&
@@ -794,7 +794,7 @@ DiyReact.useState = (initial) => {
 2. Sets the `wipRoot` as the `nextUnitOfWork` to retrigger the render phase (the same thing happens inside the `render` function).
 
 ```js
-DiyReact.useState = (initial) => {
+DiyReact.useState = initial => {
   // ...
 
   const hook = {
@@ -802,7 +802,7 @@ DiyReact.useState = (initial) => {
     queue: [],
   };
 
-  const setState = (action) => {
+  const setState = action => {
     // 1. Enqueue action
     hook.queue.push(action);
     // 2. Retrigger render phase by setting next unit of work
@@ -826,14 +826,14 @@ One last thing to add: when `setState` is in fact invoked and the render phase g
 In particular, we want to invoke any enqueued actions and store the return value(s) as our new state.
 
 ```js
-const useState = (initial) => {
+const useState = initial => {
   // ...
   const hook = {
     // ...
   };
 
   const actions = oldHook ? oldHook.queue : [];
-  actions.forEach((actions) => {
+  actions.forEach(actions => {
     hook.state = action(hook.state);
   });
 };
